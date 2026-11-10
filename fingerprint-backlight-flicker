@@ -1,0 +1,68 @@
+#!/bin/bash
+# Flickers keyboard backlight continuously while fingerprint scanner awaits a finger
+
+FLICKER_DELAY=0.12
+FLICKER_PID=""
+
+find_backlight() {
+    for path in /sys/class/leds/*kbd_backlight*/brightness; do
+        [[ -w "$path" ]] && { echo "$path"; return 0; }
+    done
+    # Not writable directly — return the path anyway for brightnessctl use
+    for path in /sys/class/leds/*kbd_backlight*/brightness; do
+        [[ -e "$path" ]] && { echo "$path"; return 0; }
+    done
+    return 1
+}
+
+get_brightness() {
+    if command -v brightnessctl &>/dev/null; then
+        local dev
+        dev=$(basename "$(dirname "$BACKLIGHT")")
+        brightnessctl -d "$dev" get 2>/dev/null
+    else
+        cat "$BACKLIGHT" 2>/dev/null
+    fi
+}
+
+set_brightness() {
+    if command -v brightnessctl &>/dev/null; then
+        local dev
+        dev=$(basename "$(dirname "$BACKLIGHT")")
+        brightnessctl -d "$dev" set "$1" -q 2>/dev/null
+    else
+        echo "$1" > "$BACKLIGHT" 2>/dev/null
+    fi
+}
+
+flicker_loop() {
+    local original
+    original=$(get_brightness) || exit 1
+    trap "set_brightness '$original'; exit" TERM INT
+    while true; do
+        set_brightness 0
+        sleep $FLICKER_DELAY
+        set_brightness "$original"
+        sleep $FLICKER_DELAY
+    done
+}
+
+stop_flicker() {
+    if [[ -n "$FLICKER_PID" ]]; then
+        kill "$FLICKER_PID" 2>/dev/null
+        wait "$FLICKER_PID" 2>/dev/null
+        FLICKER_PID=""
+    fi
+}
+
+BACKLIGHT=$(find_backlight) || { echo "No keyboard backlight found." >&2; exit 1; }
+
+gdbus monitor -y -d net.reactivated.Fprint 2>/dev/null | while IFS= read -r line; do
+    if [[ "$line" == *"VerifyFingerSelected"* ]]; then
+        stop_flicker
+        flicker_loop &
+        FLICKER_PID=$!
+    elif [[ "$line" == *"VerifyStatus"* ]]; then
+        stop_flicker
+    fi
+done

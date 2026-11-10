@@ -1,0 +1,12 @@
+[Unit]
+Description=Flicker keyboard backlight on fingerprint scan requests
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/fingerprint-backlight-flicker
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target
